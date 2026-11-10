@@ -14,11 +14,21 @@ st.title("Acceso seguro")
 
 
 if "authenticated_user" in st.session_state:
-    st.success(f"Sesión iniciada: {st.session_state.authenticated_user}")
-    if st.button("Cerrar sesión"):
+    user_profile = st.session_state["authenticated_user"]
+    if not isinstance(user_profile, dict):
         del st.session_state["authenticated_user"]
-        st.rerun()
-    st.stop()
+        st.info("La sesión anterior caducó. Inicia sesión nuevamente.")
+    else:
+        st.subheader(f"Hola, {user_profile['name']}")
+        st.success("Sesión iniciada correctamente")
+        st.markdown("### Tus datos")
+        st.write(f"**Nombre:** {user_profile['name']}")
+        st.write(f"**Correo electrónico:** {user_profile['email']}")
+        st.write("**Verificación en dos pasos:** Activada con Google Authenticator")
+        if st.button("Cerrar sesión"):
+            del st.session_state["authenticated_user"]
+            st.rerun()
+        st.stop()
 
 
 pending_registration = st.session_state.get("pending_registration")
@@ -52,7 +62,10 @@ if pending_registration:
             pending_registration["password_hash"],
             pending_registration["totp_secret"],
         ):
-            st.session_state["authenticated_user"] = pending_registration["name"]
+            st.session_state["authenticated_user"] = {
+                "name": pending_registration["name"],
+                "email": pending_registration["email"],
+            }
             del st.session_state["pending_registration"]
             st.rerun()
         else:
@@ -105,13 +118,13 @@ else:
             login = st.form_submit_button("Iniciar sesión")
 
         if login:
-            user_name = auth_service.authenticate(
+            user_profile = auth_service.authenticate(
                 login_email, login_password, login_otp
             )
-            if user_name is None:
+            if user_profile is None:
                 st.error("Correo, contraseña o código OTP incorrectos.")
             else:
-                st.session_state["authenticated_user"] = user_name
+                st.session_state["authenticated_user"] = user_profile
                 st.rerun()
 
 

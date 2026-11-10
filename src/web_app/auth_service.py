@@ -112,15 +112,15 @@ def create_user(name: str, email: str, password_hash: str, totp_secret: str) -> 
     return True
 
 
-def authenticate(email: str, password: str, otp_code: str) -> str | None:
+def authenticate(email: str, password: str, otp_code: str) -> dict[str, str] | None:
     initialize_database()
     with _connect() as connection:
         user = connection.execute(
-            "SELECT name, password_hash, totp_secret FROM users WHERE email = ?",
+            "SELECT email, name, password_hash, totp_secret FROM users WHERE email = ?",
             (email.strip().lower(),),
         ).fetchone()
     if user is None or not _verify_password(password, user["password_hash"]):
         return None
     if not verify_totp(user["totp_secret"], otp_code):
         return None
-    return user["name"]
+    return {"name": user["name"], "email": user["email"]}
