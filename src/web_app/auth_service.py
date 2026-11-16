@@ -3,25 +3,25 @@ import hashlib
 import hmac
 import os
 import secrets
-import sqlite3
 import struct
 import time
-from pathlib import Path
 from urllib.parse import quote, urlencode
 
+import psycopg
+from psycopg.rows import dict_row
 
-DATABASE_PATH = Path(os.environ.get("WEB_APP_DB", ".web_app/users.sqlite3"))
+
 PASSWORD_ITERATIONS = 600_000
 TOTP_PERIOD = 30
 TOTP_DIGITS = 6
 ISSUER = "Today"
 
 
-def _connect() -> sqlite3.Connection:
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
+def _connect() -> psycopg.Connection:
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL no está definida")
+    return psycopg.connect(database_url, row_factory=dict_row)
 
 
 def initialize_database() -> None:
@@ -104,10 +104,10 @@ def create_user(name: str, email: str, password_hash: str, totp_secret: str) -> 
     try:
         with _connect() as connection:
             connection.execute(
-                "INSERT INTO users (email, name, password_hash, totp_secret) VALUES (?, ?, ?, ?)",
+                "INSERT INTO users (email, name, password_hash, totp_secret) VALUES (%s, %s, %s, %s)",
                 (email.strip().lower(), name.strip(), password_hash, totp_secret),
             )
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
         return False
     return True
 
@@ -116,7 +116,7 @@ def authenticate(email: str, password: str, otp_code: str) -> dict[str, str] | N
     initialize_database()
     with _connect() as connection:
         user = connection.execute(
-            "SELECT email, name, password_hash, totp_secret FROM users WHERE email = ?",
+            "SELECT email, name, password_hash, totp_secret FROM users WHERE email = %s",
             (email.strip().lower(),),
         ).fetchone()
     if user is None or not _verify_password(password, user["password_hash"]):

@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Base de datos local (ya no se usa)
+.web_app/
+*.sqlite3
