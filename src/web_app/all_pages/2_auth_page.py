@@ -4,11 +4,10 @@ import re
 import qrcode
 import streamlit as st
 
-from web_app import auth_service
+from web_app import auth_service, security
 
 
 st.set_page_config(page_title="Acceso seguro", page_icon="🔐", layout="centered")
-auth_service.initialize_database()
 
 st.title("Acceso seguro")
 
@@ -93,8 +92,10 @@ else:
                 st.error("Escribe tu nombre.")
             elif not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized_email):
                 st.error("Escribe un correo electrónico válido.")
-            elif len(password) < 10:
-                st.error("La contraseña debe tener al menos 10 caracteres.")
+            elif policy_error := security.password_policy_error(
+                password, normalized_email, name
+            ):
+                st.error(policy_error)
             elif password != password_confirmation:
                 st.error("Las contraseñas no coinciden.")
             else:
