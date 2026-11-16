@@ -12,3 +12,8 @@ wheels/
 # Base de datos local (ya no se usa)
 .web_app/
 *.sqlite3
+
+# Secretos / variables de entorno locales
+.env
+.env.*
+!.env.example

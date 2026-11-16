@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import os
 import secrets
 import struct
 import time
@@ -9,6 +8,8 @@ from urllib.parse import quote, urlencode
 
 import psycopg
 from psycopg.rows import dict_row
+
+from web_app import config
 
 
 PASSWORD_ITERATIONS = 600_000
@@ -18,10 +19,7 @@ ISSUER = "Today"
 
 
 def _connect() -> psycopg.Connection:
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL no está definida")
-    return psycopg.connect(database_url, row_factory=dict_row)
+    return psycopg.connect(**config.db_conninfo(), row_factory=dict_row)
 
 
 def initialize_database() -> None:
