@@ -78,24 +78,56 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     return password_hash is not None
 
 
-# --- Cifrado del secreto TOTP (AES-256-GCM) --------------------------------
+# --- Cifrado de campos sensibles (AES-256-GCM) ------------------------------
+#
+# Cada campo se guarda en dos columnas: <campo>_ciphertext y <campo>_nonce.
+# "context" se pasa como dato asociado (AAD): liga el ciphertext a su tabla,
+# columna y dueño, de modo que copiarlo a otra fila o columna hace que falle
+# el descifrado. Usa field_context() para construirlo siempre igual.
 
 
-def encrypt_totp_secret(secret: str, email: str) -> tuple[bytes, bytes]:
-    """Cifra el secreto TOTP. Devuelve (ciphertext, nonce).
+def field_context(table: str, column: str, owner: str | int) -> str:
+    return f"{table}.{column}:{owner}"
 
-    El correo se usa como dato asociado (AAD): el ciphertext queda ligado a esa
-    cuenta y no se puede copiar a la fila de otro usuario.
-    """
+
+def encrypt_field(value: str, context: str) -> tuple[bytes, bytes]:
+    """Cifra un valor de texto. Devuelve (ciphertext, nonce)."""
     nonce = os.urandom(AES_GCM_NONCE_BYTES)
     ciphertext = AESGCM(config.encryption_key()).encrypt(
-        nonce, secret.encode("ascii"), email.encode("utf-8")
+        nonce, value.encode("utf-8"), context.encode("utf-8")
     )
     return ciphertext, nonce
 
 
-def decrypt_totp_secret(ciphertext: bytes, nonce: bytes, email: str) -> str:
+def decrypt_field(ciphertext: bytes, nonce: bytes, context: str) -> str:
     plaintext = AESGCM(config.encryption_key()).decrypt(
-        bytes(nonce), bytes(ciphertext), email.encode("utf-8")
+        bytes(nonce), bytes(ciphertext), context.encode("utf-8")
     )
-    return plaintext.decode("ascii")
+    return plaintext.decode("utf-8")
+
+
+def encrypt_optional(value: str | None, context: str) -> tuple[bytes | None, bytes | None]:
+    """Como encrypt_field, pero None se guarda como (NULL, NULL)."""
+    if value is None or value == "":
+        return None, None
+    return encrypt_field(value, context)
+
+
+def decrypt_optional(
+    ciphertext: bytes | None, nonce: bytes | None, context: str
+) -> str | None:
+    if ciphertext is None:
+        return None
+    return decrypt_field(ciphertext, nonce, context)
+
+
+# --- Secreto TOTP ----------------------------------------------------------
+# Se liga al correo porque al registrar todavía no existe user_id.
+
+
+def encrypt_totp_secret(secret: str, email: str) -> tuple[bytes, bytes]:
+    return encrypt_field(secret, email)
+
+
+def decrypt_totp_secret(ciphertext: bytes, nonce: bytes, email: str) -> str:
+    return decrypt_field(ciphertext, nonce, email)
