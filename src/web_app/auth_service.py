@@ -7,33 +7,14 @@ import time
 from urllib.parse import quote, urlencode
 
 import psycopg
-from psycopg.rows import dict_row
 
-from web_app import config
+from web_app import security
+from web_app.database import get_connection
 
 
-PASSWORD_ITERATIONS = 600_000
 TOTP_PERIOD = 30
 TOTP_DIGITS = 6
 ISSUER = "Today"
-
-
-def _connect() -> psycopg.Connection:
-    return psycopg.connect(**config.db_conninfo(), row_factory=dict_row)
-
-
-def initialize_database() -> None:
-    with _connect() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                email TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                totp_secret TEXT NOT NULL
-            )
-            """
-        )
 
 
 def create_totp_secret() -> str:
@@ -73,37 +54,27 @@ def verify_totp(secret: str, code: str, timestamp: int | None = None) -> bool:
     )
 
 
-def _hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
-    )
-    return f"{base64.b64encode(salt).decode()}:{base64.b64encode(digest).decode()}"
-
-
 def hash_password(password: str) -> str:
-    return _hash_password(password)
-
-
-def _verify_password(password: str, encoded_hash: str) -> bool:
-    try:
-        salt_text, digest_text = encoded_hash.split(":", maxsplit=1)
-        salt = base64.b64decode(salt_text)
-        expected_digest = base64.b64decode(digest_text)
-    except (ValueError, TypeError):
-        return False
-    actual_digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
-    )
-    return hmac.compare_digest(actual_digest, expected_digest)
+    return security.hash_password(password)
 
 
 def create_user(name: str, email: str, password_hash: str, totp_secret: str) -> bool:
+    normalized_email = email.strip().lower()
+    ciphertext, nonce = security.encrypt_totp_secret(totp_secret, normalized_email)
     try:
-        with _connect() as connection:
+        with get_connection() as connection:
             connection.execute(
-                "INSERT INTO users (email, name, password_hash, totp_secret) VALUES (%s, %s, %s, %s)",
-                (email.strip().lower(), name.strip(), password_hash, totp_secret),
+                """
+                INSERT INTO users (
+                    email,
+                    full_name,
+                    password_hash,
+                    totp_secret_ciphertext,
+                    totp_secret_nonce
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (normalized_email, name.strip(), password_hash, ciphertext, nonce),
             )
     except psycopg.errors.UniqueViolation:
         return False
@@ -111,14 +82,24 @@ def create_user(name: str, email: str, password_hash: str, totp_secret: str) -> 
 
 
 def authenticate(email: str, password: str, otp_code: str) -> dict[str, str] | None:
-    initialize_database()
-    with _connect() as connection:
+    normalized_email = email.strip().lower()
+    with get_connection() as connection:
         user = connection.execute(
-            "SELECT email, name, password_hash, totp_secret FROM users WHERE email = %s",
-            (email.strip().lower(),),
+            """
+            SELECT email, full_name, password_hash,
+                   totp_secret_ciphertext, totp_secret_nonce
+            FROM users
+            WHERE email = %s
+            """,
+            (normalized_email,),
         ).fetchone()
-    if user is None or not _verify_password(password, user["password_hash"]):
+
+    # Se verifica la contraseña aunque el usuario no exista (mismo tiempo de respuesta).
+    if not security.verify_password(password, user["password_hash"] if user else None):
         return None
-    if not verify_totp(user["totp_secret"], otp_code):
+    totp_secret = security.decrypt_totp_secret(
+        user["totp_secret_ciphertext"], user["totp_secret_nonce"], user["email"]
+    )
+    if not verify_totp(totp_secret, otp_code):
         return None
-    return {"name": user["name"], "email": user["email"]}
+    return {"name": user["full_name"], "email": user["email"]}
