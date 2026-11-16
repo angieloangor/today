@@ -55,13 +55,14 @@ if pending_registration:
             pending_registration["totp_secret"], otp_code
         ):
             st.error("El código no es válido. Revisa la hora del dispositivo e inténtalo otra vez.")
-        elif auth_service.create_user(
+        elif user_id := auth_service.create_user(
             pending_registration["name"],
             pending_registration["email"],
             pending_registration["password_hash"],
             pending_registration["totp_secret"],
         ):
             st.session_state["authenticated_user"] = {
+                "user_id": user_id,
                 "name": pending_registration["name"],
                 "email": pending_registration["email"],
             }
